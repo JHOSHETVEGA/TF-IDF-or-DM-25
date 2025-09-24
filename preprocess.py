@@ -1,12 +1,27 @@
-import re, unidecode
-import nltk
+# preprocess.py
+import re, unidecode, spacy, nltk
 from nltk.corpus import stopwords
-import spacy
 
-def load_spacy(lang="en"):
-    return spacy.load("en_core_web_sm", disable=["parser","ner","textcat"])
+def _ensure_nltk():
+    try: nltk.data.find('tokenizers/punkt')
+    except LookupError: nltk.download('punkt')
+    try: nltk.data.find('corpora/stopwords')
+    except LookupError: nltk.download('stopwords')
 
-def get_stopwords(lang="en"):
+def load_spacy(lang: str = "en"):
+    if lang != "en":
+        raise ValueError("Proyecto configurado para inglés (20 Newsgroups).")
+    name = "en_core_web_sm"
+    try:
+        return spacy.load(name, disable=["parser","ner","textcat"])
+    except OSError:
+        # Descarga automática si no está instalado en el servidor
+        from spacy.cli import download
+        download(name)
+        return spacy.load(name, disable=["parser","ner","textcat"])
+
+def get_stopwords(lang: str = "en"):
+    _ensure_nltk()
     return set(stopwords.words("english"))
 
 def basic_clean(text: str) -> str:

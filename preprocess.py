@@ -1,11 +1,13 @@
+# preprocess.py  (sin spaCy)
 import re
 import unidecode
-import spacy
 import nltk
 from nltk.corpus import stopwords
+from nltk import word_tokenize
+from nltk.stem import WordNetLemmatizer, PorterStemmer
 
 def _ensure_nltk():
-    """Descarga puntualmente los recursos NLTK si faltan (útil en servidores limpios)."""
+    """Descarga puntualmente los recursos NLTK si faltan (común en servidores limpios)."""
     try:
         nltk.data.find("tokenizers/punkt")
     except LookupError:
@@ -14,21 +16,27 @@ def _ensure_nltk():
         nltk.data.find("corpora/stopwords")
     except LookupError:
         nltk.download("stopwords")
+    try:
+        nltk.data.find("corpora/wordnet")
+    except LookupError:
+        nltk.download("wordnet")
+    try:
+        nltk.data.find("corpora/omw-1.4")
+    except LookupError:
+        nltk.download("omw-1.4")
 
 def load_spacy(lang: str = "en"):
     """
-    Carga el modelo de spaCy. En producción (Streamlit Cloud), el wheel se instala
-    desde requirements.txt; si no está, se descarga on-the-fly.
+    API compatible con tu código original, pero SIN spaCy.
+    Devuelve un 'ctx' con herramientas NLTK (lemmatizer y stemmer).
     """
     if lang != "en":
         raise ValueError("Proyecto configurado para inglés (20 Newsgroups).")
-    name = "en_core_web_sm"
-    try:
-        return spacy.load(name, disable=["parser", "ner", "textcat"])
-    except OSError:
-        from spacy.cli import download
-        download(name)
-        return spacy.load(name, disable=["parser", "ner", "textcat"])
+    _ensure_nltk()
+    return {
+        "lemmatizer": WordNetLemmatizer(),
+        "stemmer": PorterStemmer()
+    }
 
 def get_stopwords(lang: str = "en"):
     _ensure_nltk()
@@ -38,7 +46,7 @@ def get_stopwords(lang: str = "en"):
 
 def basic_clean(text: str) -> str:
     """
-    Minúsculas, sin acentos, solo letras y espacios, colapsa espacios.
+    Minúsculas, sin acentos, deja solo letras y espacios, colapsa espacios.
     """
     text = text.lower()
     text = unidecode.unidecode(text)
@@ -46,10 +54,16 @@ def basic_clean(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
-def tokenize_lemmatize(text: str, nlp, stop_set):
+def tokenize_lemmatize(text: str, nlp_ctx, stop_set):
     """
-    Lematiza con spaCy y filtra tokens no alfabéticos y stopwords.
+    Tokeniza con NLTK, filtra stopwords y no-alfabéticos,
+    y LEMATIZA con WordNet (sin spaCy).
     """
-    doc = nlp(text)
-    tokens = [t.lemma_ for t in doc if t.is_alpha and t.lemma_ not in stop_set]
+    tokens = []
+    for w in word_tokenize(text):
+        w = w.lower()
+        if w.isalpha() and w not in stop_set:
+            w = nlp_ctx["lemmatizer"].lemmatize(w)  # lematización simple
+            # Si prefieres stemming: w = nlp_ctx["stemmer"].stem(w)
+            tokens.append(w)
     return tokens

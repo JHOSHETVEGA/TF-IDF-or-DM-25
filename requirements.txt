@@ -1,0 +1,6 @@
+streamlit
+scikit-learn
+rank-bm25
+spacy
+nltk
+unidecode

@@ -1,69 +1,62 @@
-# preprocess.py  (sin spaCy)
 import re
-import unidecode
+import spacy
 import nltk
 from nltk.corpus import stopwords
-from nltk import word_tokenize
-from nltk.stem import WordNetLemmatizer, PorterStemmer
+from nltk.tokenize import word_tokenize
+import string
 
-def _ensure_nltk():
-    """Descarga puntualmente los recursos NLTK si faltan (común en servidores limpios)."""
-    try:
-        nltk.data.find("tokenizers/punkt")
-    except LookupError:
-        nltk.download("punkt")
-    try:
-        nltk.data.find("corpora/stopwords")
-    except LookupError:
-        nltk.download("stopwords")
-    try:
-        nltk.data.find("corpora/wordnet")
-    except LookupError:
-        nltk.download("wordnet")
-    try:
-        nltk.data.find("corpora/omw-1.4")
-    except LookupError:
-        nltk.download("omw-1.4")
+# Descargar recursos de NLTK
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
 
-def load_spacy(lang: str = "en"):
-    """
-    API compatible con tu código original, pero SIN spaCy.
-    Devuelve un 'ctx' con herramientas NLTK (lemmatizer y stemmer).
-    """
-    if lang != "en":
-        raise ValueError("Proyecto configurado para inglés (20 Newsgroups).")
-    _ensure_nltk()
-    return {
-        "lemmatizer": WordNetLemmatizer(),
-        "stemmer": PorterStemmer()
-    }
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
 
-def get_stopwords(lang: str = "en"):
-    _ensure_nltk()
-    if lang != "en":
-        raise ValueError("Proyecto configurado para inglés (20 Newsgroups).")
-    return set(stopwords.words("english"))
-
-def basic_clean(text: str) -> str:
-    """
-    Minúsculas, sin acentos, deja solo letras y espacios, colapsa espacios.
-    """
-    text = text.lower()
-    text = unidecode.unidecode(text)
-    text = re.sub(r"[^a-z\s]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-def tokenize_lemmatize(text: str, nlp_ctx, stop_set):
-    """
-    Tokeniza con NLTK, filtra stopwords y no-alfabéticos,
-    y LEMATIZA con WordNet (sin spaCy).
-    """
-    tokens = []
-    for w in word_tokenize(text):
-        w = w.lower()
-        if w.isalpha() and w not in stop_set:
-            w = nlp_ctx["lemmatizer"].lemmatize(w)  # lematización simple
-            # Si prefieres stemming: w = nlp_ctx["stemmer"].stem(w)
-            tokens.append(w)
-    return tokens
+class TextPreprocessor:
+    def __init__(self, language='english'):
+        self.language = language
+        self.stop_words = set(stopwords.words(language))
+        
+        # Cargar modelo de spaCy para lematización
+        try:
+            if language == 'spanish':
+                self.nlp = spacy.load('es_core_news_sm', disable=['parser', 'ner'])
+            else:
+                self.nlp = spacy.load('en_core_web_sm', disable=['parser', 'ner'])
+        except OSError:
+            print("Modelo spaCy no encontrado. Usando lematización básica.")
+            self.nlp = None
+    
+    def clean_text(self, text):
+        """Limpia y preprocesa el texto"""
+        # Convertir a minúsculas
+        text = text.lower()
+        
+        # Eliminar signos de puntuación y caracteres especiales
+        text = re.sub(r'[^\w\s]', ' ', text)
+        text = re.sub(r'\d+', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        # Tokenización
+        tokens = word_tokenize(text, language='spanish' if self.language == 'spanish' else 'english')
+        
+        # Eliminar stopwords
+        tokens = [token for token in tokens if token not in self.stop_words and len(token) > 2]
+        
+        # Lematización
+        if self.nlp:
+            doc = self.nlp(" ".join(tokens))
+            tokens = [token.lemma_ for token in doc]
+        
+        return tokens
+    
+    def preprocess_corpus(self, documents):
+        """Preprocesa un conjunto de documentos"""
+        processed_docs = []
+        for doc in documents:
+            processed_docs.append(self.clean_text(doc))
+        return processed_docs

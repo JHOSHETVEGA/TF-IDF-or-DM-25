@@ -1,65 +1,165 @@
 import streamlit as st
-from sklearn.datasets import fetch_20newsgroups
-from preprocess import load_spacy, get_stopwords, basic_clean, tokenize_lemmatize
-from retrieval import TfidfSearcher, BM25Searcher
+import sys
+import os
 
-# ---------- Config ----------
-st.set_page_config(page_title="IR 20NG: TF-IDF vs BM25", page_icon="🔎", layout="centered")
+# Agregar src al path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-# ---------- Datos ----------
-@st.cache_data(show_spinner=False)
-def load_docs():
-    cats = ["sci.space", "rec.sport.baseball", "talk.politics.misc"]
-    data = fetch_20newsgroups(
-        subset="train",
-        categories=cats,
-        remove=("headers", "footers", "quotes"),
+from preprocess import TextPreprocessor
+from models import VectorialModel, BM25Model
+from utils import download_20_newsgroups, download_spanish_news, load_custom_documents
+
+# Configuración de la página
+st.set_page_config(
+    page_title="Sistema de Recuperación de Información",
+    page_icon="🔍",
+    layout="wide"
+)
+
+def main():
+    st.title("🔍 Sistema de Recuperación de Información")
+    st.markdown("### Implementación de Modelos Vectorial (TF-IDF) y BM25")
+    
+    # Sidebar para configuración
+    st.sidebar.header("Configuración")
+    
+    # Selección de idioma
+    language = st.sidebar.selectbox(
+        "Idioma del corpus",
+        ["english", "spanish"],
+        index=1
     )
-    docs = data.data[:200]   # subset de 200 documentos
-    ids  = [f"20NG_{i}" for i in range(len(docs))]
-    return docs, ids
-
-# ---------- Índices (ambos modelos) ----------
-@st.cache_resource(show_spinner=False)
-def build_indices(docs, ids):
-    nlp = load_spacy("en")
-    stop_set = get_stopwords("en")
-    cleaned = [basic_clean(d) for d in docs]
-    tokenized = [tokenize_lemmatize(d, nlp, stop_set) for d in cleaned]
-
-    tfidf = TfidfSearcher(tokenized, ids, docs)
-    bm25  = BM25Searcher(tokenized, ids, docs)
-    return tfidf, bm25, nlp, stop_set
-
-# ---------- UI ----------
-st.title("IR Demo: 20 Newsgroups (TF-IDF vs BM25)")
-st.caption("Escribe una consulta y usa los botones para ejecutar cada modelo.")
-
-docs, ids = load_docs()
-tfidf_searcher, bm25_searcher, nlp, stop_set = build_indices(docs, ids)
-
-query = st.text_input("Consulta en lenguaje natural", value="moon mission")
-top_k = st.number_input("Top-K", min_value=1, max_value=10, value=3, step=1)
-
-colA, colB = st.columns(2)
-btn_tfidf = colA.button("Buscar con TF-IDF")
-btn_bm25  = colB.button("Buscar con BM25")
-
-def render_results(title, results):
-    st.subheader(title)
-    if not results:
-        st.info("Sin resultados.")
+    
+    # Selección de dataset
+    dataset_choice = st.sidebar.selectbox(
+        "Fuente de documentos",
+        ["20 Newsgroups (Inglés)", "Noticias en Español", "Cargar archivo personalizado"]
+    )
+    
+    # Cargar documentos
+    documents = []
+    
+    if dataset_choice == "20 Newsgroups (Inglés)":
+        documents = download_20_newsgroups()
+    elif dataset_choice == "Noticias en Español":
+        documents = download_spanish_news()
+    else:
+        uploaded_file = st.sidebar.file_uploader(
+            "Cargar archivo (TXT o CSV)", 
+            type=['txt', 'csv']
+        )
+        if uploaded_file:
+            # Guardar archivo temporalmente
+            with open("temp_file", "wb") as f:
+                f.write(uploaded_file.getvalue())
+            documents = load_custom_documents("temp_file")
+            os.remove("temp_file")
+    
+    if not documents:
+        st.warning("Por favor, carga algunos documentos para comenzar.")
         return
-    for rank, (doc_id, score, raw) in enumerate(results, start=1):
-        st.markdown(f"**#{rank}. {doc_id}** — Score: `{score:.4f}`")
-        st.write(raw[:500] + ("..." if len(raw) > 500 else ""))
-        st.divider()
+    
+    # Mostrar información del corpus
+    st.sidebar.info(f"📊 Corpus cargado: {len(documents)} documentos")
+    
+    # Preprocesamiento
+    st.header("1. Preprocesamiento de Texto")
+    
+    with st.spinner("Preprocesando documentos..."):
+        preprocessor = TextPreprocessor(language=language)
+        processed_docs = preprocessor.preprocess_corpus(documents)
+    
+    st.success(f"✅ Preprocesamiento completado. {len(processed_docs)} documentos procesados.")
+    
+    # Mostrar ejemplo de preprocesamiento
+    with st.expander("Ver ejemplo de preprocesamiento"):
+        st.write("**Documento original:**")
+        st.write(documents[0][:200] + "...")
+        st.write("**Documento preprocesado:**")
+        st.write(" ".join(processed_docs[0][:20]) + "...")
+    
+    # Entrenar modelos
+    st.header("2. Modelos de Recuperación")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        vectorial_model = VectorialModel()
+        vectorial_model.fit(processed_docs, documents)
+        st.success("✅ Modelo Vectorial (TF-IDF) entrenado")
+    
+    with col2:
+        bm25_model = BM25Model()
+        bm25_model.fit(processed_docs, documents)
+        st.success("✅ Modelo BM25 entrenado")
+    
+    # Búsqueda
+    st.header("3. Búsqueda de Documentos")
+    
+    # Selección de modelo
+    model_choice = st.radio(
+        "Seleccionar modelo de búsqueda:",
+        ["Modelo Vectorial (TF-IDF)", "BM25"]
+    )
+    
+    # Input de consulta
+    query = st.text_input(
+        "Ingresa tu consulta:",
+        placeholder="Ej: inteligencia artificial cambio climático"
+    )
+    
+    if query:
+        # Preprocesar consulta
+        query_processed = preprocessor.clean_text(query)
+        
+        if not query_processed:
+            st.error("La consulta no contiene términos válidos después del preprocesamiento.")
+            return
+        
+        st.write(f"**Consulta preprocesada:** {', '.join(query_processed)}")
+        
+        # Realizar búsqueda
+        with st.spinner("Buscando documentos relevantes..."):
+            if model_choice == "Modelo Vectorial (TF-IDF)":
+                results = vectorial_model.search(query_processed, top_k=3)
+            else:
+                results = bm25_model.search(query_processed, top_k=3)
+        
+        # Mostrar resultados
+        st.header("4. Resultados (Top 3)")
+        
+        if not results:
+            st.warning("No se encontraron documentos relevantes para la consulta.")
+        else:
+            for i, result in enumerate(results, 1):
+                with st.container():
+                    st.markdown(f"### 📄 Documento #{i} (Puntaje: {result['score']:.4f})")
+                    st.write(f"**Índice en el corpus:** {result['index']}")
+                    st.write("**Contenido:**")
+                    # Mostrar solo los primeros 300 caracteres
+                    content_preview = result['document'][:300] + "..." if len(result['document']) > 300 else result['document']
+                    st.write(content_preview)
+                    st.markdown("---")
+    
+    # Información adicional
+    st.sidebar.header("Información del Sistema")
+    st.sidebar.info("""
+    **Características implementadas:**
+    - ✅ Preprocesamiento completo
+    - ✅ Modelo Vectorial (TF-IDF)
+    - ✅ Modelo BM25
+    - ✅ Interfaz Streamlit
+    - ✅ Soporte para inglés y español
+    """)
 
-if btn_tfidf or btn_bm25:
-    q_tokens = tokenize_lemmatize(basic_clean(query), nlp, stop_set)
-    if btn_tfidf:
-        render_results("Resultados (TF-IDF)", tfidf_searcher.search(q_tokens, top_k=int(top_k)))
-    if btn_bm25:
-        render_results("Resultados (BM25)", bm25_searcher.search(q_tokens, top_k=int(top_k)))
-
-st.caption("Tip: prueba la misma consulta en ambos botones y compara diferencias.")
+if __name__ == "__main__":
+    # Instalar modelos de spaCy si no están disponibles
+    try:
+        import spacy
+        if len(sys.argv) > 1 and sys.argv[1] == "install-models":
+            spacy.cli.download("en_core_web_sm")
+            spacy.cli.download("es_core_news_sm")
+    except:
+        pass
+    
+    main()

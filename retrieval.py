@@ -1,41 +1,78 @@
-from typing import List, Tuple
-import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from rank_bm25 import BM25Okapi
+import numpy as np
 
-class TfidfSearcher:
-    """
-    Buscador basado en TF-IDF + similitud coseno.
-    Trabaja con documentos ya tokenizados (listas de strings).
-    """
-    def __init__(self, tokenized_docs: List[List[str]], doc_ids: List[str], raw_docs: List[str]):
-        self.vectorizer = TfidfVectorizer(
-            tokenizer=lambda x: x,       # identidad (ya tokenizado)
-            preprocessor=lambda x: x,    # identidad
-            lowercase=False,
-            token_pattern=None           # evita warnings cuando pasas tokenizer custom
-        )
-        self.doc_ids = doc_ids
-        self.raw_docs = raw_docs
-        self.X = self.vectorizer.fit_transform(tokenized_docs)
+class VectorialModel:
+    def __init__(self):
+        self.vectorizer = None
+        self.tfidf_matrix = None
+        self.documents = None
+    
+    def fit(self, processed_docs, original_docs):
+        """Entrena el modelo TF-IDF"""
+        self.documents = original_docs
+        # Convertir tokens a texto para TF-IDF
+        text_docs = [' '.join(tokens) for tokens in processed_docs]
+        
+        self.vectorizer = TfidfVectorizer()
+        self.tfidf_matrix = self.vectorizer.fit_transform(text_docs)
+    
+    def search(self, query, top_k=3):
+        """Realiza búsqueda con el modelo vectorial"""
+        if self.vectorizer is None:
+            raise ValueError("Modelo no entrenado. Llama al método fit primero.")
+        
+        # Preprocesar query
+        query_vec = self.vectorizer.transform([' '.join(query)])
+        
+        # Calcular similitud del coseno
+        similarities = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
+        
+        # Obtener top-k documentos
+        top_indices = similarities.argsort()[-top_k:][::-1]
+        results = []
+        
+        for idx in top_indices:
+            if similarities[idx] > 0:
+                results.append({
+                    'document': self.documents[idx],
+                    'score': similarities[idx],
+                    'index': idx
+                })
+        
+        return results
 
-    def search(self, query_tokens: List[str], top_k: int = 3) -> List[Tuple[str, float, str]]:
-        q = self.vectorizer.transform([query_tokens])
-        sims = cosine_similarity(q, self.X).flatten()
-        idxs = np.argsort(sims)[::-1][:top_k]
-        return [(self.doc_ids[i], float(sims[i]), self.raw_docs[i]) for i in idxs]
-
-class BM25Searcher:
-    """
-    Buscador basado en BM25 (Okapi). Premia coincidencia exacta y normaliza por longitud.
-    """
-    def __init__(self, tokenized_docs: List[List[str]], doc_ids: List[str], raw_docs: List[str]):
-        self.bm25 = BM25Okapi(tokenized_docs)  # k1=1.5, b=0.75 por defecto
-        self.doc_ids = doc_ids
-        self.raw_docs = raw_docs
-
-    def search(self, query_tokens: List[str], top_k: int = 3) -> List[Tuple[str, float, str]]:
-        scores = self.bm25.get_scores(query_tokens)
-        idxs = np.argsort(scores)[::-1][:top_k]
-        return [(self.doc_ids[i], float(scores[i]), self.raw_docs[i]) for i in idxs]
+class BM25Model:
+    def __init__(self):
+        self.bm25 = None
+        self.documents = None
+        self.processed_docs = None
+    
+    def fit(self, processed_docs, original_docs):
+        """Entrena el modelo BM25"""
+        self.documents = original_docs
+        self.processed_docs = processed_docs
+        self.bm25 = BM25Okapi(processed_docs)
+    
+    def search(self, query, top_k=3):
+        """Realiza búsqueda con BM25"""
+        if self.bm25 is None:
+            raise ValueError("Modelo no entrenado. Llama al método fit primero.")
+        
+        # Calcular scores BM25
+        scores = self.bm25.get_scores(query)
+        
+        # Obtener top-k documentos
+        top_indices = scores.argsort()[-top_k:][::-1]
+        results = []
+        
+        for idx in top_indices:
+            if scores[idx] > 0:
+                results.append({
+                    'document': self.documents[idx],
+                    'score': scores[idx],
+                    'index': idx
+                })
+        
+        return results

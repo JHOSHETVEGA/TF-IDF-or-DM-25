@@ -1,8 +1,10 @@
-# app.py
 import streamlit as st
 from sklearn.datasets import fetch_20newsgroups
 from preprocess import load_spacy, get_stopwords, basic_clean, tokenize_lemmatize
 from retrieval import TfidfSearcher, BM25Searcher
+
+# ---------- Config ----------
+st.set_page_config(page_title="IR 20NG: TF-IDF vs BM25", page_icon="🔎", layout="centered")
 
 # ---------- Datos ----------
 @st.cache_data(show_spinner=False)
@@ -20,20 +22,18 @@ def load_docs():
 # ---------- Índices (ambos modelos) ----------
 @st.cache_resource(show_spinner=False)
 def build_indices(docs, ids):
-    # Preprocesamiento único para ambos modelos
     nlp = load_spacy("en")
     stop_set = get_stopwords("en")
     cleaned = [basic_clean(d) for d in docs]
     tokenized = [tokenize_lemmatize(d, nlp, stop_set) for d in cleaned]
 
-    # Construir buscadores
     tfidf = TfidfSearcher(tokenized, ids, docs)
     bm25  = BM25Searcher(tokenized, ids, docs)
     return tfidf, bm25, nlp, stop_set
 
 # ---------- UI ----------
 st.title("IR Demo: 20 Newsgroups (TF-IDF vs BM25)")
-st.caption("Escribe una consulta y usa los botones para buscar con cada modelo.")
+st.caption("Escribe una consulta y usa los botones para ejecutar cada modelo.")
 
 docs, ids = load_docs()
 tfidf_searcher, bm25_searcher, nlp, stop_set = build_indices(docs, ids)
@@ -57,14 +57,9 @@ def render_results(title, results):
 
 if btn_tfidf or btn_bm25:
     q_tokens = tokenize_lemmatize(basic_clean(query), nlp, stop_set)
-
     if btn_tfidf:
-        results_tfidf = tfidf_searcher.search(q_tokens, top_k=int(top_k))
-        render_results("Resultados (TF-IDF)", results_tfidf)
-
+        render_results("Resultados (TF-IDF)", tfidf_searcher.search(q_tokens, top_k=int(top_k)))
     if btn_bm25:
-        results_bm25 = bm25_searcher.search(q_tokens, top_k=int(top_k))
-        render_results("Resultados (BM25)", results_bm25)
+        render_results("Resultados (BM25)", bm25_searcher.search(q_tokens, top_k=int(top_k)))
 
-st.caption("Tip: prueba la misma consulta con ambos botones y compara los Top-K.")
-
+st.caption("Tip: prueba la misma consulta en ambos botones y compara diferencias.")
